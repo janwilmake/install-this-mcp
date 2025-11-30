@@ -3,7 +3,7 @@
   "name": "install-this-mcp",
   "account_id": "080fd9e0587416d2fa30ed1f527e2323",
   "compatibility_date": "2025-09-08",
-  "main": "worker.js",
+  "main": "worker.ts",
   "routes": [
     { "custom_domain": true, "pattern": "installthismcp.com" },
     { "custom_domain": true, "pattern": "www.installthismcp.com" }

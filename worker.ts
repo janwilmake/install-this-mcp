@@ -1,20 +1,20 @@
-const { generateMCPConfig, generateMCPInstallationGuide } = require("./index");
+import { generateMCPConfig, generateMCPInstallationGuide } from "./index";
+import type { MCPServerCardResponse, MCPServerCard, Icon } from "./server-card";
 
-/**
- * @typedef {import("./index").InitializeResult} InitializeResult
- * @typedef {import("./index").MCPConfig} MCPConfig
- * @typedef {import("./index").ServerIcon} ServerIcon
- */
+interface MCPConfig {
+  client: string;
+  iconUrl?: string;
+  deepLink?: string;
+  remoteCommand?: string;
+  instructions?: string;
+  configJson?: unknown;
+}
 
-/**
- * Fetches MCP server metadata via GET request with application/json accept header
- * @param {string} mcpUrl - MCP server URL
- * @returns {Promise<InitializeResult | null>} Server metadata or null if unavailable
- */
-async function fetchMCPMetadata(mcpUrl) {
+async function fetchMCPMetadata(mcpUrl: string): Promise<MCPServerCard | null> {
   const segments = mcpUrl.split("/");
   segments.pop();
   const wellKnownUrl = segments.join("/") + "/.well-known/mcp";
+
   try {
     const response = await fetch(wellKnownUrl, {
       method: "GET",
@@ -25,23 +25,42 @@ async function fetchMCPMetadata(mcpUrl) {
       return null;
     }
 
-    /** @type {InitializeResult} */
-    const data = await response.json();
-    return Array.isArray(data)
-      ? data.find((x) => x.url === mcpUrl) || data[0]
-      : data;
+    const data: MCPServerCardResponse = await response.json();
+
+    // Handle array response - find matching URL
+    if (Array.isArray(data)) {
+      const match = data.find((card) => {
+        if (!card.transport) return false;
+
+        // Check if transport endpoint matches
+        if (
+          card.transport.type === "streamable-http" ||
+          card.transport.type === "sse"
+        ) {
+          const transportUrl =
+            card.transport.type === "streamable-http"
+              ? new URL(card.transport.endpoint, mcpUrl).href
+              : card.transport.url;
+          return (
+            transportUrl === mcpUrl ||
+            mcpUrl.includes(card.transport.endpoint || "")
+          );
+        }
+
+        return false;
+      });
+
+      return match || data[0] || null;
+    }
+
+    return data;
   } catch (error) {
     console.error("Failed to fetch MCP metadata:", error);
     return null;
   }
 }
 
-/**
- * Gets the best icon from server metadata
- * @param {ServerIcon[] | undefined} icons - Array of server icons
- * @returns {string | null} Icon URL or null
- */
-function getBestIcon(icons) {
+function getBestIcon(icons?: Icon[]): string | null {
   if (!icons || icons.length === 0) return null;
 
   // Prefer PNG or JPEG, then SVG, then WebP
@@ -56,22 +75,13 @@ function getBestIcon(icons) {
   return icons[0].src;
 }
 
-/**
- * Generates HTML for the installation widget
- * @param {string} mcpUrl - MCP server URL
- * @param {string} serverName - Server display name
- * @param {MCPConfig[]} configs - Client configurations
- * @param {string | null} selectedClient - Selected client name
- * @param {InitializeResult | null} metadata - Server metadata
- * @returns {string} HTML string
- */
 function generateHTML(
-  mcpUrl,
-  serverName,
-  configs,
-  selectedClient = null,
-  metadata = null
-) {
+  mcpUrl: string,
+  serverName: string,
+  configs: MCPConfig[],
+  selectedClient: string | null = null,
+  metadata: MCPServerCard | null = null
+): string {
   const apexDomain = new URL(mcpUrl).hostname
     .split(".")
     .reverse()
@@ -83,11 +93,24 @@ function generateHTML(
   const displayName = metadata?.serverInfo?.title || serverName;
   const version = metadata?.serverInfo?.version;
   const websiteUrl = metadata?.serverInfo?.websiteUrl;
-  const description =
-    metadata?.serverInfo?.description || metadata?.instructions;
+  const description = metadata?.description || metadata?.instructions;
   const serverIcon =
-    getBestIcon(metadata?.serverInfo?.icons) ||
+    getBestIcon(metadata?.serverInfo?.icons || metadata?.icons) ||
     `https://www.google.com/s2/favicons?domain=${apexDomain}&sz=128`;
+
+  // Additional metadata
+  const protocolVersion = metadata?.protocolVersion;
+  const documentationUrl = metadata?.documentationUrl;
+  const transportType = metadata?.transport?.type;
+  const hasResources =
+    metadata?.resources &&
+    (metadata.resources === "dynamic" || metadata.resources.length > 0);
+  const hasTools =
+    metadata?.tools &&
+    (metadata.tools === "dynamic" || metadata.tools.length > 0);
+  const hasPrompts =
+    metadata?.prompts &&
+    (metadata.prompts === "dynamic" || metadata.prompts.length > 0);
 
   // Filter configs if a specific client is selected
   const displayConfigs = selectedClient
@@ -177,6 +200,17 @@ function generateHTML(
             max-height: 500px;
         }
 
+        .metadata-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            background: #f3f4f6;
+            border-radius: 0.25rem;
+            color: #6b7280;
+        }
+
         /* Iframe mode styles */
         .iframe-mode body {
             background: white;
@@ -225,25 +259,99 @@ function generateHTML(
                      onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%23d1d5db%22%3E%3Cpath d=%22M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z%22/%3E%3C/svg%3E'">
                 <div class="flex-1 min-w-0">
                     <h1 class="text-xl font-semibold text-gray-900 truncate">${displayName}</h1>
-                    <div class="flex items-center gap-2 text-sm text-gray-500">
+                    <div class="flex items-center gap-2 text-sm text-gray-500 flex-wrap mt-1">
                         ${
                           version
-                            ? `<span class="text-xs bg-gray-100 px-2 py-0.5 rounded">v${version}</span>`
+                            ? `<span class="metadata-badge">v${version}</span>`
+                            : ""
+                        }
+                        ${
+                          protocolVersion
+                            ? `<span class="metadata-badge">MCP ${protocolVersion}</span>`
+                            : ""
+                        }
+                        ${
+                          transportType
+                            ? `<span class="metadata-badge">${transportType}</span>`
                             : ""
                         }
                         ${
                           websiteUrl
-                            ? `<a href="${websiteUrl}" target="_blank" class="text-gray-600 hover:text-gray-900 flex items-center gap-1">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            ? `<a href="${websiteUrl}" target="_blank" class="text-gray-600 hover:text-gray-900 flex items-center gap-1 text-xs">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
                             </svg>
                             Website
                         </a>`
                             : ""
                         }
+                        ${
+                          documentationUrl
+                            ? `<a href="${documentationUrl}" target="_blank" class="text-gray-600 hover:text-gray-900 flex items-center gap-1 text-xs">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                            </svg>
+                            Docs
+                        </a>`
+                            : ""
+                        }
                     </div>
                 </div>
             </div>
+            
+            ${
+              hasResources || hasTools || hasPrompts
+                ? `
+            <div class="flex items-center gap-2 mb-3 flex-wrap">
+                <span class="text-xs text-gray-600">Provides:</span>
+                ${
+                  hasResources
+                    ? `<span class="metadata-badge">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                    </svg>
+                    Resources${
+                      typeof metadata.resources === "object"
+                        ? ` (${metadata.resources.length})`
+                        : ""
+                    }
+                </span>`
+                    : ""
+                }
+                ${
+                  hasTools
+                    ? `<span class="metadata-badge">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                    </svg>
+                    Tools${
+                      typeof metadata.tools === "object"
+                        ? ` (${metadata.tools.length})`
+                        : ""
+                    }
+                </span>`
+                    : ""
+                }
+                ${
+                  hasPrompts
+                    ? `<span class="metadata-badge">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                    </svg>
+                    Prompts${
+                      typeof metadata.prompts === "object"
+                        ? ` (${metadata.prompts.length})`
+                        : ""
+                    }
+                </span>`
+                    : ""
+                }
+            </div>
+            `
+                : ""
+            }
+            
             ${
               description
                 ? `
@@ -303,7 +411,6 @@ function generateHTML(
     </div>
     
     <div class="footer-wrapper text-center mt-6 mb-4">
-
         <div>
             <a href="https://github.com/janwilmake/install-this-mcp" 
             class="footer-link flex flex-row items-center gap-2 text-sm">
@@ -576,7 +683,6 @@ function generateHTML(
     </div>
     
     <div class="footer-wrapper text-center mt-6 mb-4">
-
         <div>
             <a href="https://github.com/janwilmake/install-this-mcp" 
             class="footer-link flex flex-row items-center gap-2 text-sm">
@@ -653,14 +759,11 @@ function generateHTML(
 </html>`;
 }
 
-/**
- * Generates the guides page HTML
- * @param {string} mcpUrl - MCP server URL
- * @param {string} serverName - Server display name
- * @param {MCPConfig[]} configs - Client configurations
- * @returns {string} HTML string
- */
-function generateGuidesPage(mcpUrl, serverName, configs) {
+function generateGuidesPage(
+  mcpUrl: string,
+  serverName: string,
+  configs: MCPConfig[]
+): string {
   const baseUrl = `https://installthismcp.com/${encodeURIComponent(
     serverName
   )}?url=${encodeURIComponent(mcpUrl)}`;
@@ -836,7 +939,7 @@ function generateGuidesPage(mcpUrl, serverName, configs) {
                         <button onclick="toggleEmbed()" class="w-full text-left">
                             <div class="flex items-center justify-between">
                                 <div>
-                                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Embed Widget on Website</h2>
+                                    <h2 class="text-lg font-semibold text-gray-900 mb-1">Embed Widget on Website (BETA)</h2>
                                     <p class="text-sm text-gray-600">Interactive installation widget (click to expand)</p>
                                 </div>
                                 <svg id="embed-icon" class="w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -928,11 +1031,8 @@ function generateGuidesPage(mcpUrl, serverName, configs) {
 </body>
 </html>`;
 }
-/**
- * Generates the landing page HTML
- * @returns {string} HTML string
- */
-function generateLandingPage() {
+
+function generateLandingPage(): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1014,14 +1114,7 @@ function generateLandingPage() {
 }
 
 export default {
-  /**
-   * Handles incoming requests
-   * @param {Request} request - Incoming request
-   * @param {Object} env - Environment variables
-   * @param {Object} ctx - Execution context
-   * @returns {Promise<Response>} Response
-   */
-  async fetch(request, env, ctx) {
+  async fetch(request: Request, env: unknown, ctx: unknown): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/favicon.svg") {
@@ -1041,7 +1134,6 @@ export default {
     const mcpUrl = url.searchParams.get("url");
 
     if (pathParts.length > 0 && mcpUrl) {
-      // Fetch metadata from MCP server
       const metadata = await fetchMCPMetadata(mcpUrl);
       const serverName =
         metadata?.serverInfo?.title || decodeURIComponent(pathParts[0]);
@@ -1059,14 +1151,17 @@ export default {
             },
           });
         } catch (error) {
-          return new Response("Error generating guides: " + error.message, {
-            status: 500,
-            headers: { "Content-Type": "text/plain" },
-          });
+          return new Response(
+            "Error generating guides: " + (error as Error).message,
+            {
+              status: 500,
+              headers: { "Content-Type": "text/plain" },
+            }
+          );
         }
       }
 
-      let selectedClient = null;
+      let selectedClient: string | null = null;
 
       // Handle client-specific page: /{name}/for/{client}
       if (pathParts.length === 3 && pathParts[1] === "for") {
@@ -1090,10 +1185,13 @@ export default {
           },
         });
       } catch (error) {
-        return new Response("Error generating guide: " + error.message, {
-          status: 500,
-          headers: { "Content-Type": "text/plain" },
-        });
+        return new Response(
+          "Error generating guide: " + (error as Error).message,
+          {
+            status: 500,
+            headers: { "Content-Type": "text/plain" },
+          }
+        );
       }
     }
 

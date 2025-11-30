@@ -73,4 +73,6 @@ We favor clients with wide adoption, but less popular clients are also welcome i
 
 # TODO
 
-- align this with server-cards spec that comes out of https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1649
+- Do more testing regarding the iframe opening one-click installation things across browsers and possibly automate this and connect with vendors
+- Support official registry entries
+- Align this with server-cards spec that comes out of https://github.com/modelcontextprotocol/modelcontextprotocol/issues/1649

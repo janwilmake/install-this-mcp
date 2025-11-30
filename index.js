@@ -1,40 +1,4 @@
 /**
- * @typedef {Object} ServerIcon
- * @property {string} src - URI pointing to icon resource
- * @property {string} [mimeType] - MIME type of the icon
- * @property {string[]} [sizes] - Array of size strings (e.g., "48x48", "any")
- * @property {"light" | "dark"} [theme] - Theme the icon is designed for
- */
-
-/**
- * @typedef {Object} ServerInfo
- * @property {string} name - Server name
- * @property {string} [title] - Human-readable display name
- * @property {string} version - Server version
- * @property {string} [websiteUrl] - Optional website URL
- * @property {ServerIcon[]} [icons] - Optional array of icons
- */
-
-/**
- * @typedef {Object} ServerCapabilities
- * @property {Object} [experimental] - Experimental capabilities
- * @property {Object} [logging] - Logging support
- * @property {Object} [completions] - Completion support
- * @property {Object} [prompts] - Prompt template support
- * @property {Object} [resources] - Resource support
- * @property {Object} [tools] - Tool support
- */
-
-/**
- * @typedef {Object} InitializeResult
- * @property {string} protocolVersion - MCP protocol version
- * @property {ServerCapabilities} capabilities - Server capabilities
- * @property {ServerInfo} serverInfo - Server information
- * @property {string} [instructions] - Usage instructions
- * @property {Object} [_meta] - Metadata
- */
-
-/**
  * @typedef {Object} MCPConfig
  * @property {string} client - Client name
  * @property {string} iconUrl - Client icon URL
